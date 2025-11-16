@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <title>محاكي سرية وأمن نظم قواعد البيانات</title>
+    <style>
+        body{
+            font-family:"Tahoma",system-ui;
+            background:#f5f5f5;
+            margin:0;
+            padding:0;
+        }
+        .container{
+            max-width:1050px;
+            margin:20px auto;
+            background:#fff;
+            padding:20px;
+            border-radius:10px;
+            box-shadow:0 0 10px rgba(0,0,0,0.1);
+        }
+        h1{
+            margin-top:0;
+            text-align:center;
+        }
+        .subtitle{
+            text-align:center;
+            color:#666;
+            margin-bottom:10px;
+        }
+        .layout{
+            display:grid;
+            grid-template-columns:1.1fr 0.9fr;
+            gap:15px;
+        }
+        @media(max-width:900px){
+            .layout{grid-template-columns:1fr;}
+        }
+        textarea{
+            width:100%;
+            height:220px;
+            font-family:"Consolas","Courier New",monospace;
+            font-size:13px;
+            direction:ltr;
+            padding:8px;
+            border-radius:6px;
+            border:1px solid #ccc;
+            box-sizing:border-box;
+        }
+        button{
+            padding:8px 12px;
+            border:none;
+            border-radius:6px;
+            cursor:pointer;
+            background:#1976d2;
+            color:#fff;
+            font-size:14px;
+            margin-left:5px;
+            margin-bottom:5px;
+        }
+        button.secondary{background:#555;}
+        .status{
+            margin:10px 0;
+            padding:8px;
+            border-radius:6px;
+            background:#e3f2fd;
+            font-size:13px;
+        }
+        .user-box{
+            margin:10px 0;
+            padding:8px;
+            border-radius:6px;
+            background:#fce4ec;
+            font-size:13px;
+        }
+        table{
+            width:100%;
+            border-collapse:collapse;
+            margin-top:8px;
+            background:#fafafa;
+        }
+        th,td{
+            border:1px solid #ddd;
+            padding:6px 8px;
+            text-align:center;
+            font-size:13px;
+        }
+        th{background:#eee;}
+        .log{
+            max-height:280px;
+            overflow-y:auto;
+            border:1px solid #ddd;
+            border-radius:6px;
+            padding:8px;
+            background:#fafafa;
+            font-size:13px;
+        }
+        .log-entry{margin:2px 0;}
+        .badge{
+            display:inline-block;
+            padding:1px 5px;
+            border-radius:4px;
+            font-size:11px;
+            margin-left:4px;
+        }
+        .badge-sql{background:#ffe082;}
+        .badge-tx{background:#bbdefb;}
+        .badge-info{background:#c8e6c9;}
+        .badge-err{background:#ffcdd2;}
+        .chip-row{
+            font-size:12px;
+            color:#555;
+            margin-bottom:6px;
+        }
+        .chip-row span{
+            display:inline-block;
+            background:#f0f0f0;
+            padding:3px 6px;
+            margin:2px;
+            border-radius:10px;
+        }
+        .hint{
+            font-size:12px;
+            color:#777;
+            margin-bottom:5px;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>محاكي سرية وأمن نظم قواعد البيانات</h1>
+    <div class="subtitle">
+        تدريب عملي على:
+        <b>تشفير الحقول الحساسة (NationalID) + إنشاء الأدوار والصلاحيات (Roles)</b><br>
+        مع محاكاة بسيطة لدوال <b>AES_ENCRYPT / AES_DECRYPT</b> وإنشاء Role <b>Auditor</b>.
+    </div>
+
+    <div class="chip-row">
+        <span>CREATE TABLE Employees (...)</span>
+        <span>INSERT INTO Employees VALUES (...)</span>
+        <span>UPDATE Employees SET NationalID = AES_ENCRYPT(NationalID,'secretKey');</span>
+        <span>SELECT EmpID, EmpName, AES_DECRYPT(NationalID,'secretKey') AS DecodedID FROM Employees;</span>
+    </div>
+    <div class="chip-row">
+        <span>CREATE ROLE Auditor;</span>
+        <span>GRANT SELECT ON Employees TO Auditor;</span>
+        <span>CREATE USER auditUser IDENTIFIED BY 'aud123';</span>
+        <span>GRANT Auditor TO auditUser;</span>
+        <span>SET USER auditUser;</span>
+    </div>
+
+    <div class="layout">
+        <!-- محرر SQL + الجدول -->
+        <div>
+            <h3>محرّر أوامر SQL</h3>
+            <div class="hint">
+                اكتبي أوامر SQL (يمكن أكثر من أمر في نفس الوقت وافصلي بينها بـ <b>;</b>) ثم اضغطي "تنفيذ".
+                <br>أوامر التشفير والأدوار هنا محاكاة تعليمية مبسّطة.
+            </div>
+            <textarea id="sql-input"></textarea>
+            <div style="margin-top:8px;">
+                <button onclick="executeSQL()">▶ تنفيذ الأوامر</button>
+                <button class="secondary" onclick="loadSample()">تحميل مثال الدرس</button>
+                <button class="secondary" onclick="resetAll()">إعادة تهيئة المحاكي</button>
+            </div>
+
+            <div class="user-box" id="user-box"></div>
+            <div class="status" id="status"></div>
+
+            <h3>جدول الموظفين (Employees)</h3>
+            <table>
+                <thead>
+                <tr>
+                    <th>EmpID</th>
+                    <th>EmpName</th>
+                    <th>NationalID (مخزن)</th>
+                    <th>Salary</th>
+                </tr>
+                </thead>
+                <tbody id="employees-body">
+                <!-- يملأ برمجياً -->
+                </tbody>
+            </table>
+        </div>
+
+        <!-- سجل التنفيذ -->
+        <div>
+            <h3>سجل التنفيذ والشرح</h3>
+            <div class="log" id="log"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // ====== نموذج بيانات مبسّط ======
+    let employees = [];
+    let roles = [];          // {name}
+    let users = [];          // {username, password, roles:[]}
+    let grants = [];         // {roleName, tableName, privilege}
+    let currentUser = "admin"; // admin لديه صلاحيات كاملة في المحاكي
+
+    const tbody = document.getElementById('employees-body');
+    const logDiv = document.getElementById('log');
+    const statusDiv = document.getElementById('status');
+    const userBox = document.getElementById('user-box');
+    const sqlInput = document.getElementById('sql-input');
+
+    // ====== عرض الجدول ======
+    function renderEmployees(){
+        tbody.innerHTML = "";
+        if(employees.length === 0){
+            const tr = document.createElement('tr');
+            tr.innerHTML = '<td colspan="4">لا توجد بيانات حالياً في Employees.</td>';
+            tbody.appendChild(tr);
+            return;
+        }
+        employees.forEach(emp => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>${emp.EmpID}</td>
+                <td>${emp.EmpName}</td>
+                <td>${emp.NationalID}</td>
+                <td>${emp.Salary.toFixed(2)}</td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+
+    // ====== سجل الرسائل ======
+    function log(message, type){
+        const div = document.createElement('div');
+        div.className = 'log-entry';
+        let badge = '';
+        if(type === 'sql')  badge = '<span class="badge badge-sql">SQL</span>';
+        if(type === 'tx')   badge = '<span class="badge badge-tx">SEC</span>';
+        if(type === 'info') badge = '<span class="badge badge-info">شرح</span>';
+        if(type === 'err')  badge = '<span class="badge badge-err">خطأ</span>';
+        div.innerHTML = badge + " " + message;
+        logDiv.appendChild(div);
+        logDiv.scrollTop = logDiv.scrollHeight;
+    }
+
+    function updateStatus(){
+        userBox.textContent =
+            "المستخدم الحالي: " + currentUser +
+            (currentUser === "admin"
+                ? " (صلاحيات كاملة لأغراض التدريب)."
+                : " (تُطبَّق عليه صلاحيات الأدوار الممنوحة).");
+
+        const readableGrants = grants.map(g => g.roleName + ": " + g.privilege + " ON " + g.tableName);
+        statusDiv.textContent =
+            "الأدوار: [" + roles.map(r=>r.name).join(", ") + "] | " +
+            "المستخدمون: [" + users.map(u=>u.username).join(", ") + "] | " +
+            "الصلاحيات: [" + (readableGrants.join("; ") || "لا يوجد بعد") + "]";
+    }
+
+    // ====== محاكاة "تشفير" / "فك تشفير" (ليس AES حقيقي) ======
+    function fakeEncrypt(text, key){
+        // نقوم بتمثيل بسيط: نضيف المفتاح ونحوّله لـ base64
+        try{
+            return "ENC(" + btoa(text + "|" + key) + ")";
+        }catch(e){
+            return "ENC(" + text + ")";
+        }
+    }
+
+    function fakeDecrypt(encText, key){
+        if(!encText.startsWith("ENC(") || !encText.endsWith(")")){
+            return "(غير مشفّر/صيغة غير معروفة)";
+        }
+        const inner = encText.slice(4, -1); // ما بين ENC(
+        try{
+            const decoded = atob(inner);
+            const parts = decoded.split("|");
+            if(parts.length === 2 && parts[1] === key){
+                return parts[0];
+            }
+            return "(مفتاح غير صحيح)";
+        }catch(e){
+            return "(تعذر فك التشفير)";
+        }
+    }
+
+    // ====== صلاحيات مبسّطة ======
+    function findUser(username){
+        return users.find(u => u.username.toLowerCase() === username.toLowerCase());
+    }
+
+    function hasPrivilege(username, privilege, tableName){
+        if(username === "admin") return true; // المدرّس لديه كل الصلاحيات
+        const user = findUser(username);
+        if(!user) return false;
+        // اجمع صلاحيات كل الأدوار المعطاة للمستخدم
+        const userRoles = user.roles || [];
+        for(const r of userRoles){
+            if(grants.some(g =>
+                g.roleName.toLowerCase() === r.toLowerCase() &&
+                g.tableName.toLowerCase() === tableName.toLowerCase() &&
+                g.privilege.toUpperCase() === privilege.toUpperCase()
+            )){
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // ====== إعادة التهيئة ======
+    function resetAll(){
+        employees = [];
+        roles = [];
+        users = [];
+        grants = [];
+        currentUser = "admin";
+        logDiv.innerHTML = "";
+        renderEmployees();
+        updateStatus();
+        log("تمت إعادة تهيئة المحاكي. ابدئي بإنشاء جدول Employees ثم إدخال البيانات.", "info");
+    }
+
+    // ====== تحميل مثال الدرس ======
+    function loadSample(){
+        const sample = [
+            "-- الخطوة 1: إنشاء جدول يحتوي بيانات حساسة",
+            "CREATE TABLE Employees (",
+            "    EmpID INT PRIMARY KEY,",
+            "    EmpName VARCHAR(50),",
+            "    NationalID VARCHAR(20),",
+            "    Salary DECIMAL(10,2)",
+            ");",
+            "INSERT INTO Employees VALUES (1, 'Aisha Ali', '1122334455', 8000.00);",
+            "INSERT INTO Employees VALUES (2, 'Mona Saad', '2233445566', 9500.00);",
+            "SELECT * FROM Employees;",
+            "",
+            "-- الخطوة 2: تطبيق التشفير على رقم الهوية",
+            "UPDATE Employees",
+            "SET NationalID = AES_ENCRYPT(NationalID, 'secretKey');",
+            "SELECT * FROM Employees;",
+            "",
+            "-- الخطوة 3: فك التشفير عند الاستعلام",
+            "SELECT EmpID, EmpName,",
+            "AES_DECRYPT(NationalID, 'secretKey') AS DecodedID",
+            "FROM Employees;",
+            "",
+            "-- تدريب عملي على الأدوار والصلاحيات",
+            "CREATE ROLE Auditor;",
+            "GRANT SELECT ON Employees TO Auditor;",
+            "CREATE USER auditUser IDENTIFIED BY 'aud123';",
+            "GRANT Auditor TO auditUser;",
+            "",
+            "-- تغيير المستخدم الحالي للاختبار",
+            "SET USER auditUser;",
+            "-- هذا الاستعلام مسموح (SELECT فقط):",
+            "SELECT EmpID, EmpName,",
+            "AES_DECRYPT(NationalID, 'secretKey') AS DecodedID",
+            "FROM Employees;",
+            "",
+            "-- محاولة تعديل الراتب (ستُرفض لأن Auditor يمتلك SELECT فقط):",
+            "UPDATE Employees SET Salary = Salary + 1000 WHERE EmpID = 1;",
+            "",
+            "-- العودة للمدرّس:",
+            "SET USER admin;"
+        ].join("\n");
+        sqlInput.value = sample;
+    }
+
+    // ====== تنفيذ أوامر SQL ======
+    function executeSQL(){
+        const raw = sqlInput.value;
+        if(!raw.trim()){
+            log("من فضلك اكتبي أمرًا واحدًا على الأقل.", "info");
+            return;
+        }
+
+        // إزالة التعليقات --
+        const withoutComments = raw
+            .split("\n")
+            .map(line => line.replace(/--.*/,""))
+            .join("\n");
+
+        // تقسيم على ;
+        const statements = withoutComments
+            .split(";")
+            .map(s => s.trim())
+            .filter(s => s.length > 0);
+
+        statements.forEach(stmt => runStatement(stmt));
+        renderEmployees();
+        updateStatus();
+    }
+
+    function runStatement(stmt){
+        const upper = stmt.toUpperCase();
+
+        // CREATE TABLE Employees
+        if(/^CREATE\s+TABLE\s+EMPLOYEES/i.test(stmt)){
+            return handleCreateTable(stmt);
+        }
+
+        // INSERT INTO Employees VALUES (...)
+        if(/^INSERT\s+INTO\s+EMPLOYEES\s+VALUES/i.test(upper)){
+            return handleInsert(stmt);
+        }
+
+        // UPDATE Employees SET ...
+        if(/^UPDATE\s+EMPLOYEES/i.test(upper)){
+            return handleUpdate(stmt);
+        }
+
+        // SELECT * FROM Employees
+        if(/^SELECT\s+\*\s+FROM\s+EMPLOYEES/i.test(upper)){
+            return handleSelectAll(stmt);
+        }
+
+        // SELECT EmpID, EmpName, AES_DECRYPT(...)
+        if(/^SELECT\s+EMPID\s*,\s*EMPNAME\s*,/i.test(upper) &&
+           upper.includes("AES_DECRYPT") &&
+           upper.includes("FROM EMPLOYEES")){
+            return handleSelectDecrypted(stmt);
+        }
+
+        // CREATE ROLE ...
+        if(/^CREATE\s+ROLE\s+/i.test(upper)){
+            return handleCreateRole(stmt);
+        }
+
+        // GRANT ... ON Employees TO ...
+        if(/^GRANT\s+/i.test(upper) && upper.includes(" ON EMPLOYEES TO ")){
+            return handleGrant(stmt);
+        }
+
+        // CREATE USER ...
+        if(/^CREATE\s+USER\s+/i.test(upper)){
+            return handleCreateUser(stmt);
+        }
+
+        // GRANT Role TO User
+        if(/^GRANT\s+/i.test(upper) && upper.includes(" TO ")){
+            return handleGrantRoleToUser(stmt);
+        }
+
+        // SET USER username;
+        if(/^SET\s+USER\s+/i.test(upper)){
+            return handleSetUser(stmt);
+        }
+
+        log("الأمر غير مدعوم في هذا المحاكي التعليمي: <code>" + stmt + "</code>", "err");
+    }
+
+    // ====== معالجات الأوامر ======
+
+    function handleCreateTable(stmt){
+        employees = [];
+        log("CREATE TABLE Employees (...)", "sql");
+        log("تم إنشاء جدول Employees (الهيكل مبسّط لأغراض التدريب).", "info");
+    }
+
+    function handleInsert(stmt){
+        const m = stmt.match(/INSERT\s+INTO\s+EMPLOYEES\s+VALUES\s*\((.+)\)/i);
+        if(!m){
+            log("صيغة INSERT غير مدعومة. استخدمي: INSERT INTO Employees VALUES (EmpID,'Name','NationalID',Salary);", "err");
+            return;
+        }
+        const inside = m[1];
+        const parts = inside.split(",");
+        if(parts.length < 4){
+            log("يجب أن يحتوي INSERT على 4 قيم: EmpID, EmpName, NationalID, Salary.", "err");
+            return;
+        }
+        const EmpID = parseInt(parts[0]);
+        let EmpName = parts[1].trim().replace(/^['"`]/,"").replace(/['"`]$/,"");
+        let NationalID = parts[2].trim().replace(/^['"`]/,"").replace(/['"`]$/,"");
+        const Salary = parseFloat(parts[3]);
+
+        if(isNaN(EmpID) || isNaN(Salary)){
+            log("تعذر قراءة EmpID أو Salary في أمر INSERT.", "err");
+            return;
+        }
+        if(employees.some(e => e.EmpID === EmpID)){
+            log("لا يمكن إدخال EmpID مكرر (PRIMARY KEY).", "err");
+            return;
+        }
+        employees.push({
+            EmpID: EmpID,
+            EmpName: EmpName,
+            NationalID: NationalID,
+            Salary: Salary
+        });
+        log(stmt, "sql");
+        log("تمت إضافة الموظف " + EmpName + " (EmpID=" + EmpID + ").", "info");
+    }
+
+    function handleUpdate(stmt){
+        // التحقق من الصلاحية
+        if(!hasPrivilege(currentUser, "UPDATE", "Employees")){
+            log("المستخدم " + currentUser + " لا يمتلك صلاحية UPDATE على Employees.", "err");
+            return;
+        }
+
+        // حالة التشفير: UPDATE Employees SET NationalID = AES_ENCRYPT(NationalID,'secretKey');
+        if(/SET\s+NATIONALID\s*=\s*AES_ENCRYPT\s*\(\s*NATIONALID\s*,\s*'([^']+)'\s*\)/i.test(stmt)){
+            const m = stmt.match(/AES_ENCRYPT\s*\(\s*NATIONALID\s*,\s*'([^']+)'\s*\)/i);
+            const key = m ? m[1] : "secretKey";
+            employees.forEach(emp => {
+                emp.NationalID = fakeEncrypt(emp.NationalID, key);
+            });
+            log(stmt, "sql");
+            log("تم تطبيق (تشفير تعليمي) على الحقل NationalID باستخدام المفتاح '" + key + "'.", "info");
+            log("⚠ هذه ليست خوارزمية AES حقيقية بل محاكاة للتوضيح فقط.", "info");
+            return;
+        }
+
+        // حالة تعديل الراتب مثلًا: UPDATE Employees SET Salary = Salary + 1000 WHERE EmpID = 1;
+        const m = stmt.match(/SET\s+SALARY\s*=\s*SALARY\s*([+-])\s*(\d+(\.\d+)?)\s+WHERE\s+EMPID\s*=\s*(\d+)/i);
+        if(m){
+            const sign = m[1];
+            const amount = parseFloat(m[2]);
+            const id = parseInt(m[4]);
+            const emp = employees.find(e => e.EmpID === id);
+            if(!emp){
+                log("لا يوجد موظف برقم EmpID=" + id + ".", "err");
+                return;
+            }
+            const old = emp.Salary;
+            emp.Salary = sign === "+" ? emp.Salary + amount : emp.Salary - amount;
+            log(stmt, "sql");
+            log("تم تعديل راتب الموظف EmpID=" + id + " من " + old.toFixed(2) + " إلى " + emp.Salary.toFixed(2) + ".", "info");
+            return;
+        }
+
+        log("صيغة UPDATE هذه غير مدعومة في المحاكي حالياً.", "err");
+    }
+
+    function handleSelectAll(stmt){
+        if(!hasPrivilege(currentUser, "SELECT", "Employees")){
+            log("المستخدم " + currentUser + " لا يمتلك صلاحية SELECT على Employees.", "err");
+            return;
+        }
+        log(stmt, "sql");
+        if(employees.length === 0){
+            log("النتيجة: لا توجد صفوف في Employees.", "info");
+            return;
+        }
+        employees.forEach(emp => {
+            log("EmpID=" + emp.EmpID +
+                ", EmpName='" + emp.EmpName +
+                "', NationalID='" + emp.NationalID +
+                "', Salary=" + emp.Salary.toFixed(2), "info");
+        });
+    }
+
+    function handleSelectDecrypted(stmt){
+        if(!hasPrivilege(currentUser, "SELECT", "Employees")){
+            log("المستخدم " + currentUser + " لا يمتلك صلاحية SELECT على Employees.", "err");
+            return;
+        }
+        // استخراج المفتاح من AES_DECRYPT(NationalID,'secretKey')
+        const m = stmt.match(/AES_DECRYPT\s*\(\s*NATIONALID\s*,\s*'([^']+)'\s*\)/i);
+        const key = m ? m[1] : "secretKey";
+        log(stmt, "sql");
+        employees.forEach(emp => {
+            const dec = fakeDecrypt(emp.NationalID, key);
+            log("EmpID=" + emp.EmpID +
+                ", EmpName='" + emp.EmpName +
+                "', DecodedID='" + dec + "'", "info");
+        });
+        log("تم استخدام مفتاح '" + key + "' لفك التشفير التعليمي.", "info");
+    }
+
+    function handleCreateRole(stmt){
+        const m = stmt.match(/CREATE\s+ROLE\s+([A-Z0-9_]+)/i);
+        if(!m){
+            log("صيغة CREATE ROLE غير صحيحة.", "err");
+            return;
+        }
+        const roleName = m[1];
+        if(roles.some(r => r.name.toLowerCase() === roleName.toLowerCase())){
+            log("الدور " + roleName + " موجود مسبقاً.", "err");
+            return;
+        }
+        roles.push({name: roleName});
+        log(stmt, "sql");
+        log("تم إنشاء الدور (Role) باسم " + roleName + ".", "info");
+    }
+
+    function handleGrant(stmt){
+        // GRANT SELECT ON Employees TO Auditor;
+        const m = stmt.match(/GRANT\s+([A-Z]+)\s+ON\s+EMPLOYEES\s+TO\s+([A-Z0-9_]+)/i);
+        if(!m){
+            log("صيغة GRANT على Employees غير صحيحة.", "err");
+            return;
+        }
+        const priv = m[1].toUpperCase();
+        const roleName = m[2];
+        if(!roles.some(r => r.name.toLowerCase() === roleName.toLowerCase())){
+            log("لا يوجد Role باسم " + roleName + ".", "err");
+            return;
+        }
+        grants.push({roleName: roleName, tableName: "Employees", privilege: priv});
+        log(stmt, "sql");
+        log("تم منح الصلاحية " + priv + " على Employees للدور " + roleName + ".", "info");
+    }
+
+    function handleCreateUser(stmt){
+        // CREATE USER auditUser IDENTIFIED BY 'aud123';
+        const m = stmt.match(/CREATE\s+USER\s+([A-Z0-9_]+)\s+IDENTIFIED\s+BY\s+'([^']+)'/i);
+        if(!m){
+            log("صيغة CREATE USER غير صحيحة.", "err");
+            return;
+        }
+        const username = m[1];
+        const password = m[2];
+        if(findUser(username)){
+            log("المستخدم " + username + " موجود مسبقاً.", "err");
+            return;
+        }
+        users.push({username: username, password: password, roles: []});
+        log(stmt, "sql");
+        log("تم إنشاء المستخدم " + username + " (كلمة المرور مخزّنة لأغراض العرض فقط).", "info");
+    }
+
+    function handleGrantRoleToUser(stmt){
+        // GRANT Auditor TO auditUser;
+        const m = stmt.match(/GRANT\s+([A-Z0-9_]+)\s+TO\s+([A-Z0-9_]+)/i);
+        if(!m){
+            log("صيغة GRANT Role TO User غير صحيحة.", "err");
+            return;
+        }
+        const roleName = m[1];
+        const username = m[2];
+        if(!roles.some(r => r.name.toLowerCase() === roleName.toLowerCase())){
+            log("لا يوجد Role باسم " + roleName + ".", "err");
+            return;
+        }
+        const user = findUser(username);
+        if(!user){
+            log("لا يوجد مستخدم باسم " + username + ".", "err");
+            return;
+        }
+        if(!user.roles.includes(roleName)){
+            user.roles.push(roleName);
+        }
+        log(stmt, "sql");
+        log("تم ربط المستخدم " + username + " بالدور " + roleName + ".", "info");
+    }
+
+    function handleSetUser(stmt){
+        // SET USER auditUser;
+        const m = stmt.match(/SET\s+USER\s+([A-Z0-9_]+)/i);
+        if(!m){
+            log("صيغة SET USER غير صحيحة.", "err");
+            return;
+        }
+        const username = m[1];
+        if(username.toLowerCase() === "admin"){
+            currentUser = "admin";
+            log(stmt, "sql");
+            log("تم تغيير المستخدم الحالي إلى admin (صلاحيات كاملة لأغراض التدريب).", "info");
+            return;
+        }
+        const user = findUser(username);
+        if(!user){
+            log("لا يوجد مستخدم باسم " + username + ".", "err");
+            return;
+        }
+        currentUser = username;
+        log(stmt, "sql");
+        log("تم تغيير المستخدم الحالي إلى " + username + ". الآن تُطبَّق صلاحيات الأدوار الممنوحة له فقط.", "info");
+    }
+
+    // ====== تهيئة أولية ======
+    resetAll();
+    loadSample(); // لتحفيز الطالبة – يمكن مسحه لو أحببتِ
+</script>
+</body>
+</html>
