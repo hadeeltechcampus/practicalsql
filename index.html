@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <title>محاكي محرر SQL - معاملات ACID</title>
+    <style>
+        body{
+            font-family: "Tahoma", system-ui;
+            background:#f5f5f5;
+            margin:0;
+            padding:0;
+        }
+        .container{
+            max-width:1000px;
+            margin:20px auto;
+            background:#fff;
+            padding:20px;
+            border-radius:10px;
+            box-shadow:0 0 10px rgba(0,0,0,0.1);
+        }
+        h1{
+            text-align:center;
+            margin-top:0;
+        }
+        .subtitle{
+            text-align:center;
+            color:#666;
+            margin-bottom:15px;
+        }
+        .layout{
+            display:grid;
+            grid-template-columns:1.1fr 0.9fr;
+            gap:15px;
+        }
+        @media (max-width:900px){
+            .layout{
+                grid-template-columns:1fr;
+            }
+        }
+        textarea{
+            width:100%;
+            height:220px;
+            font-family: "Consolas","Courier New",monospace;
+            font-size:13px;
+            direction:ltr;
+            padding:8px;
+            border-radius:6px;
+            border:1px solid #ccc;
+            box-sizing:border-box;
+        }
+        button{
+            padding:8px 12px;
+            border:none;
+            border-radius:6px;
+            cursor:pointer;
+            background:#1976d2;
+            color:#fff;
+            font-size:14px;
+            margin-left:5px;
+            margin-bottom:5px;
+        }
+        button.secondary{
+            background:#555;
+        }
+        .status{
+            margin:10px 0;
+            padding:8px;
+            border-radius:6px;
+            background:#e3f2fd;
+            font-size:14px;
+        }
+        table{
+            width:100%;
+            border-collapse:collapse;
+            margin-top:10px;
+            background:#fafafa;
+        }
+        th, td{
+            border:1px solid #ddd;
+            padding:6px 8px;
+            text-align:center;
+            font-size:13px;
+        }
+        th{
+            background:#eee;
+        }
+        .log{
+            max-height:260px;
+            overflow-y:auto;
+            border:1px solid #ddd;
+            border-radius:6px;
+            padding:8px;
+            background:#fafafa;
+            font-size:13px;
+        }
+        .log-entry{
+            margin:2px 0;
+        }
+        .badge{
+            display:inline-block;
+            padding:1px 5px;
+            border-radius:4px;
+            font-size:11px;
+            margin-left:4px;
+        }
+        .badge-sql{background:#ffe082;}
+        .badge-tx{background:#bbdefb;}
+        .badge-info{background:#c8e6c9;}
+        .badge-err{background:#ffcdd2;}
+        .hint{
+            font-size:12px;
+            color:#777;
+            margin-bottom:6px;
+        }
+        .section-title{
+            margin-top:15px;
+            margin-bottom:5px;
+        }
+        .chips{
+            font-size:12px;
+            color:#555;
+        }
+        .chips span{
+            display:inline-block;
+            background:#f0f0f0;
+            padding:3px 6px;
+            margin:2px;
+            border-radius:10px;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>محاكي محرر SQL لمعاملات ACID</h1>
+    <div class="subtitle">
+        اكتب أوامر SQL ثم اضغط "تنفيذ" لمشاهدة تأثيرها على جدول <b>Accounts</b> مع دعم<br>
+        <b>BEGIN TRANSACTION / COMMIT / ROLLBACK</b> لمحاكاة خصائص ACID.
+    </div>
+
+    <div class="chips">
+        <span>CREATE TABLE Accounts (...)</span>
+        <span>INSERT INTO Accounts VALUES (...)</span>
+        <span>UPDATE Accounts SET Balance = Balance ± 500 WHERE Acc_no = ...</span>
+        <span>SELECT * FROM Accounts;</span>
+        <span>BEGIN TRANSACTION;</span>
+        <span>COMMIT;</span>
+        <span>ROLLBACK;</span>
+    </div>
+
+    <div class="layout">
+        <!-- محرر SQL -->
+        <div>
+            <h3 class="section-title">محرر أوامر SQL</h3>
+            <div class="hint">
+                يمكنك كتابة أكثر من أمر في نفس الوقت، وافصل بينها بعلامة <b>;</b> مثل بيئة SQL الحقيقية.
+            </div>
+            <textarea id="sql-input"></textarea>
+            <div style="margin-top:8px;">
+                <button onclick="executeSQL()">▶ تنفيذ الأوامر</button>
+                <button class="secondary" onclick="loadSample()">تحميل مثال التحويل بين حسابين</button>
+                <button class="secondary" onclick="resetEverything()">إعادة تهيئة المحاكي</button>
+            </div>
+
+            <div class="status" id="status"></div>
+
+            <h3 class="section-title">جدول الحسابات (Accounts)</h3>
+            <table>
+                <thead>
+                <tr>
+                    <th>رقم الحساب (Acc_no)</th>
+                    <th>اسم الحساب (Acc_name)</th>
+                    <th>الرصيد (Balance)</th>
+                </tr>
+                </thead>
+                <tbody id="accounts-body">
+                <!-- يُملأ برمجياً -->
+                </tbody>
+            </table>
+        </div>
+
+        <!-- سجل الأوامر -->
+        <div>
+            <h3 class="section-title">سجل التنفيذ والشرح</h3>
+            <div class="log" id="log"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // ========= البيانات وحالة المعاملة =========
+    let accounts = [];
+    let inTransaction = false;
+    let snapshot = null; // لحفظ حالة الجدول قبل المعاملة (Atomicity)
+    const statusDiv   = document.getElementById('status');
+    const logDiv      = document.getElementById('log');
+    const tbody       = document.getElementById('accounts-body');
+    const sqlInput    = document.getElementById('sql-input');
+
+    function renderTable(){
+        tbody.innerHTML = "";
+        if(accounts.length === 0){
+            const tr = document.createElement('tr');
+            tr.innerHTML = '<td colspan="3">لا توجد بيانات حالياً في الجدول.</td>';
+            tbody.appendChild(tr);
+            return;
+        }
+        accounts.forEach(acc => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>${acc.acc_no}</td>
+                <td>${acc.name}</td>
+                <td>${acc.balance.toFixed(2)}</td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+
+    function log(message, type){
+        const div = document.createElement('div');
+        div.className = 'log-entry';
+        let badge = '';
+        if(type === 'sql')  badge = '<span class="badge badge-sql">SQL</span>';
+        if(type === 'tx')   badge = '<span class="badge badge-tx">TX</span>';
+        if(type === 'info') badge = '<span class="badge badge-info">شرح</span>';
+        if(type === 'err')  badge = '<span class="badge badge-err">خطأ</span>';
+        div.innerHTML = badge + " " + message;
+        logDiv.appendChild(div);
+        logDiv.scrollTop = logDiv.scrollHeight;
+    }
+
+    function updateStatus(){
+        if(inTransaction){
+            statusDiv.textContent = "هناك معاملة قيد التنفيذ حالياً (Isolation & Atomicity): التغييرات لن تُثبت إلا بعد COMMIT، ويمكن التراجع عنها بـ ROLLBACK.";
+        }else{
+            statusDiv.textContent = "لا توجد معاملة قيد التنفيذ. أي تحديث يتم احتسابه كأنه (Auto-Commit) مباشرة.";
+        }
+    }
+
+    // ========= أوامر خاصة بالمحاكي =========
+    function resetEverything(){
+        accounts = [];
+        inTransaction = false;
+        snapshot = null;
+        logDiv.innerHTML = "";
+        renderTable();
+        updateStatus();
+        log("تمت إعادة تهيئة المحاكي. ابدئي بإنشاء الجدول وأوامر الإدخال.", "info");
+    }
+
+    function loadSample(){
+        const example = [
+            "-- مثال كامل على معاملة تحويل رصيد مع ROLLBACK و COMMIT",
+            "CREATE TABLE Accounts (",
+            "    Acc_no INT PRIMARY KEY,",
+            "    Acc_name VARCHAR(50),",
+            "    Balance DECIMAL(10,2)",
+            ");",
+            "INSERT INTO Accounts VALUES (2001, 'Checking Account', 5000.00);",
+            "INSERT INTO Accounts VALUES (2002, 'Savings Account', 3000.00);",
+            "",
+            "-- التحقق من الأرصدة الابتدائية",
+            "SELECT * FROM Accounts;",
+            "",
+            "-- تجربة معاملة مع التراجع",
+            "BEGIN TRANSACTION;",
+            "UPDATE Accounts SET Balance = Balance - 500 WHERE Acc_no = 2001;",
+            "UPDATE Accounts SET Balance = Balance + 500 WHERE Acc_no = 2002;",
+            "ROLLBACK;",
+            "SELECT * FROM Accounts;",
+            "",
+            "-- تجربة معاملة مع التثبيت",
+            "BEGIN TRANSACTION;",
+            "UPDATE Accounts SET Balance = Balance - 500 WHERE Acc_no = 2001;",
+            "UPDATE Accounts SET Balance = Balance + 500 WHERE Acc_no = 2002;",
+            "COMMIT;",
+            "SELECT * FROM Accounts;"
+        ].join("\n");
+        sqlInput.value = example;
+    }
+
+    // ========= تنفيذ الأوامر من المحرر =========
+    function executeSQL(){
+        const raw = sqlInput.value;
+        if(!raw.trim()){
+            log("من فضلك اكتبي أمرًا واحدًا على الأقل في المحرر.", "info");
+            return;
+        }
+
+        // إزالة التعليقات التي تبدأ بـ --
+        const withoutComments = raw
+            .split("\n")
+            .map(line => line.replace(/--.*/,""))
+            .join("\n");
+
+        // تقسيم على ;
+        const statements = withoutComments
+            .split(";")
+            .map(s => s.trim())
+            .filter(s => s.length > 0);
+
+        statements.forEach(stmt => runStatement(stmt));
+        renderTable();
+    }
+
+    function runStatement(stmt){
+        const upper = stmt.toUpperCase();
+
+        // CREATE TABLE Accounts ...
+        if(/^CREATE\s+TABLE\s+ACCOUNTS/i.test(stmt)){
+            handleCreateTable(stmt);
+            return;
+        }
+
+        // INSERT INTO Accounts VALUES (...)
+        if(/^INSERT\s+INTO\s+ACCOUNTS\s+VALUES/i.test(upper)){
+            handleInsert(stmt);
+            return;
+        }
+
+        // UPDATE Accounts SET Balance = Balance ± value WHERE Acc_no = N
+        if(/^UPDATE\s+ACCOUNTS\s+SET\s+BALANCE\s*=\s*BALANCE/i.test(upper)){
+            handleUpdate(stmt);
+            return;
+        }
+
+        // SELECT * FROM Accounts
+        if(/^SELECT\s+\*\s+FROM\s+ACCOUNTS/i.test(upper)){
+            handleSelect(stmt);
+            return;
+        }
+
+        // BEGIN TRANSACTION
+        if(/^BEGIN\s+TRANSACTION/i.test(upper)){
+            handleBegin(stmt);
+            return;
+        }
+
+        // COMMIT
+        if(/^COMMIT$/i.test(upper)){
+            handleCommit(stmt);
+            return;
+        }
+
+        // ROLLBACK
+        if(/^ROLLBACK$/i.test(upper)){
+            handleRollback(stmt);
+            return;
+        }
+
+        log("الأمر غير مدعوم في هذا المحاكي التعليمي: <code>" + stmt + "</code>", "err");
+    }
+
+    // ========= معالجات الأوامر =========
+
+    function handleCreateTable(stmt){
+        accounts = [];
+        inTransaction = false;
+        snapshot = null;
+        renderTable();
+        updateStatus();
+        log("CREATE TABLE Accounts ...", "sql");
+        log("تم إنشاء جدول Accounts منطقيًا (الهيكل مبسّط لأغراض المحاكاة).", "info");
+    }
+
+    function handleInsert(stmt){
+        const m = stmt.match(/INSERT\s+INTO\s+ACCOUNTS\s+VALUES\s*\((.+)\)/i);
+        if(!m){
+            log("صيغة INSERT غير مدعومة. استخدمي: INSERT INTO Accounts VALUES (Acc_no, 'Name', Balance);", "err");
+            return;
+        }
+        const inside = m[1];
+        const parts = inside.split(",");
+        if(parts.length < 3){
+            log("صيغة INSERT يجب أن تحتوي على 3 قيم: رقم، اسم، رصيد.", "err");
+            return;
+        }
+
+        const accNo = parseInt(parts[0]);
+        let name    = parts[1].trim();
+        // إزالة علامات الاقتباس من الاسم
+        name = name.replace(/^['"`]/,"").replace(/['"`]$/,"");
+        const balance = parseFloat(parts[2]);
+
+        if(isNaN(accNo) || isNaN(balance)){
+            log("تعذر قراءة رقم الحساب أو الرصيد في أمر INSERT.", "err");
+            return;
+        }
+
+        // التحقق من عدم تكرار المفتاح الأساسي
+        if(accounts.some(a => a.acc_no === accNo)){
+            log("لا يمكن إدخال حساب مكرر بنفس رقم الحساب (PRIMARY KEY).", "err");
+            return;
+        }
+
+        accounts.push({ acc_no: accNo, name: name, balance: balance });
+        log(stmt, "sql");
+        log("تمت إضافة الحساب " + accNo + " باسم " + name + " برصيد " + balance.toFixed(2) + ".", "info");
+    }
+
+    function handleUpdate(stmt){
+        const m = stmt.match(/UPDATE\s+ACCOUNTS\s+SET\s+BALANCE\s*=\s*BALANCE\s*([+-])\s*(\d+(\.\d+)?)\s+WHERE\s+ACC_NO\s*=\s*(\d+)/i);
+        if(!m){
+            log("صيغة UPDATE المدعومة: UPDATE Accounts SET Balance = Balance ± رقم WHERE Acc_no = رقم;", "err");
+            return;
+        }
+        const sign   = m[1];
+        const amount = parseFloat(m[2]);
+        const accNo  = parseInt(m[4]);
+
+        const acc = accounts.find(a => a.acc_no === accNo);
+        if(!acc){
+            log("لا يوجد حساب برقم " + accNo + " في الجدول.", "err");
+            return;
+        }
+
+        const oldBalance = acc.balance;
+        acc.balance = sign === "+" ? acc.balance + amount : acc.balance - amount;
+
+        log(stmt, "sql");
+        log("تم تحديث رصيد الحساب " + accNo + " من " + oldBalance.toFixed(2) + " إلى " + acc.balance.toFixed(2) + ".", "info");
+    }
+
+    function handleSelect(stmt){
+        log(stmt, "sql");
+        if(accounts.length === 0){
+            log("النتيجة: لا توجد صفوف في Accounts.", "info");
+            return;
+        }
+        accounts.forEach(acc => {
+            log("Acc_no=" + acc.acc_no + ", Name='" + acc.name + "', Balance=" + acc.balance.toFixed(2), "info");
+        });
+    }
+
+    function handleBegin(stmt){
+        if(inTransaction){
+            log("هناك معاملة مفتوحة بالفعل. يجب إنهاؤها بـ COMMIT أو ROLLBACK أولاً.", "err");
+            return;
+        }
+        snapshot = JSON.parse(JSON.stringify(accounts)); // نسخة عميقة
+        inTransaction = true;
+        updateStatus();
+        log("BEGIN TRANSACTION;", "tx");
+        log("تم حفظ حالة الجدول قبل التعديل لضمان Atomicity و Isolation.", "info");
+    }
+
+    function handleCommit(stmt){
+        if(!inTransaction){
+            log("لا توجد معاملة ليتم تثبيتها (COMMIT).", "err");
+            return;
+        }
+        inTransaction = false;
+        snapshot = null;
+        updateStatus();
+        log("COMMIT;", "tx");
+        log("تم تثبيت جميع التغييرات بشكل دائم (Durability).", "info");
+    }
+
+    function handleRollback(stmt){
+        if(!inTransaction){
+            log("لا توجد معاملة للتراجع عنها (ROLLBACK).", "err");
+            return;
+        }
+        accounts = JSON.parse(JSON.stringify(snapshot));
+        inTransaction = false;
+        snapshot = null;
+        renderTable();
+        updateStatus();
+        log("ROLLBACK;", "tx");
+        log("تم التراجع عن جميع التغييرات والعودة للحالة الأصلية (Atomicity).", "info");
+    }
+
+    // تهيئة مبدئية
+    resetEverything();
+    // تحميل المثال تلقائيًا إن أحببتِ:
+    loadSample();
+</script>
+</body>
+</html>
